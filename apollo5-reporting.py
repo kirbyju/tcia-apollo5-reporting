@@ -85,6 +85,7 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+#@st.cache_data
 def generate_monthly_report():
     # get list of all collections
     collections_json = nbia.getCollections()
@@ -203,7 +204,10 @@ def main():
 
                         # Display the dataframe
                         st.subheader("Monthly Report Data")
-                        st.dataframe(filter_dataframe(df))
+                        st.dataframe(df)
+
+                        # placeholder to make this filterable later
+                        #st.dataframe(filter_dataframe(df))
 
                         # Offer CSV download
                         st.download_button(
