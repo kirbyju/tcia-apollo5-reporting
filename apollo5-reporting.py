@@ -86,15 +86,15 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 #@st.cache_data
-def generate_monthly_report():
+def generate_monthly_report(name):
     # get list of all collections
     collections_json = nbia.getCollections()
     collections = [item['Collection'] for item in collections_json]
 
     # select only APOLLO-5 collections
-    collectionSubset = [item for item in collections if "APOLLO-5" in item]
+    collectionSubset = [item for item in collections if name in item]
     collections = collectionSubset
-    st.write(f"{len(collections)} APOLLO-5 collections are being analyzed.")
+    st.write(f"{len(collections)} APOLLO collections are being analyzed.")
     st.write(collections)
 
     # get inventory of studies
@@ -145,8 +145,11 @@ def generate_monthly_report():
     # Merge the 'ImageCount' column from image_counts_by_study into apollo5_study_report
     apollo5_study_report = pd.merge(apollo5_study_report, image_counts_by_study, on='StudyInstanceUID', how='left')
 
-    # drop unnecessary columns
-    apollo5_study_report.drop(columns=['Collection', 'AdmittingDiagnosesDescription', 'PatientName'], inplace=True)
+    # List of columns to drop
+    columns_to_drop = ['Collection', 'AdmittingDiagnosesDescription', 'PatientName']
+
+    # Drop columns if they exist
+    apollo5_study_report.drop(columns=[col for col in columns_to_drop if col in apollo5_study_report.columns], inplace=True)
 
     # Split the 'collectionSite' column into 'Collection' and 'Site'
     apollo5_study_report[['Collection', 'Site']] = apollo5_study_report['collectionSite'].str.split('//', expand=True)
@@ -171,9 +174,9 @@ def generate_monthly_report():
 
 def main():
 
-    st.set_page_config(page_title="TCIA APOLLO-5 Reporting", layout="wide")
+    st.set_page_config(page_title="TCIA APOLLO Reporting", layout="wide")
     st.sidebar.image("https://www.cancerimagingarchive.net/wp-content/uploads/2021/06/TCIA-Logo-01.png", use_column_width=True)
-    st.title("TCIA APOLLO-5 Reporting")
+    st.title("TCIA APOLLO Reporting")
 
     # Sidebar for login
     with st.sidebar:
@@ -182,7 +185,7 @@ def main():
         password = st.text_input("Password", type="password")
 
         # Report selection dropdown
-        report_options = ["Monthly Report"]
+        report_options = ["APOLLO-5 Report", "VAREPOP-APOLLO"]
         selected_report = st.selectbox("Select Report", report_options)
 
         # Generate Report button
@@ -196,72 +199,75 @@ def main():
                 if status_code == 200:
                     st.success("Login successful!")
 
-                    if selected_report == "Monthly Report":
-                        with st.spinner("Generating Monthly Report..."):
-                            df, csv_filename = generate_monthly_report()
+                    if selected_report == "APOLLO-5 Report":
+                        with st.spinner("Generating APOLLO-5 Report..."):
+                            df, csv_filename = generate_monthly_report("APOLLO-5")
+                    if selected_report == "VAREPOP-APOLLO":
+                        with st.spinner("Generating VAREPOP-APOLLO Report..."):
+                            df, csv_filename = generate_monthly_report("VAREPOP-APOLLO")
 
-                        st.success("Monthly Report generated successfully!")
+                    st.success("Monthly Report generated successfully!")
 
-                        # Display the dataframe
-                        st.subheader("Monthly Report Data")
-                        st.dataframe(df)
+                    # Display the dataframe
+                    st.subheader("Monthly Report Data")
+                    st.dataframe(df)
 
-                        # placeholder to make this filterable later
-                        #st.dataframe(filter_dataframe(df))
+                    # placeholder to make this filterable later
+                    #st.dataframe(filter_dataframe(df))
 
-                        # Offer CSV download
-                        st.download_button(
-                            label="Download CSV",
-                            data=df.to_csv(index=False),
-                            file_name=csv_filename,
-                            mime="text/csv"
-                        )
+                    # Offer CSV download
+                    st.download_button(
+                        label="Download CSV",
+                        data=df.to_csv(index=False),
+                        file_name=csv_filename,
+                        mime="text/csv"
+                    )
 
-                        # Visualizations
-                        st.subheader("Visualizations")
+                    # Visualizations
+                    st.subheader("Visualizations")
 
-                        col1, col2 = st.columns(2)
+                    col1, col2 = st.columns(2)
 
-                        with col1:
-                            # PatientID by Collection
-                            patient_counts = df.groupby('Collection')['PatientID'].nunique().reset_index()
-                            fig_collection = px.pie(patient_counts, values='PatientID', names='Collection',
-                                                    title="PatientID by Collection")
-                            st.plotly_chart(fig_collection)
+                    with col1:
+                        # PatientID by Collection
+                        patient_counts = df.groupby('Collection')['PatientID'].nunique().reset_index()
+                        fig_collection = px.pie(patient_counts, values='PatientID', names='Collection',
+                                                title="PatientID by Collection")
+                        st.plotly_chart(fig_collection)
 
-                            # Patient Sex distribution (unique PatientIDs)
-                            sex_counts = df.drop_duplicates('PatientID')['PatientSex'].value_counts()
-                            fig_sex = px.pie(values=sex_counts.values, names=sex_counts.index,
-                                             title="Distribution of Patient Sex (Unique PatientIDs)")
-                            st.plotly_chart(fig_sex)
+                        # Patient Sex distribution (unique PatientIDs)
+                        sex_counts = df.drop_duplicates('PatientID')['PatientSex'].value_counts()
+                        fig_sex = px.pie(values=sex_counts.values, names=sex_counts.index,
+                                         title="Distribution of Patient Sex (Unique PatientIDs)")
+                        st.plotly_chart(fig_sex)
 
-                        with col2:
-                            # Image Count by Collection
-                            fig_image_count = px.bar(df.groupby('Collection')['ImageCount'].sum().reset_index(),
-                                                     x='Collection', y='ImageCount', title="Total Image Count by Collection")
-                            st.plotly_chart(fig_image_count)
+                    with col2:
+                        # Image Count by Collection
+                        fig_image_count = px.bar(df.groupby('Collection')['ImageCount'].sum().reset_index(),
+                                                 x='Collection', y='ImageCount', title="Total Image Count by Collection")
+                        st.plotly_chart(fig_image_count)
 
-                            # Patient Age distribution (ordered from youngest to oldest)
-                            age_data = df.drop_duplicates('PatientID')
-                            age_data = age_data[age_data['PatientAge_Numeric'].notna()]
-                            fig_age = px.histogram(age_data, x='PatientAge_Numeric',
-                                                   title="Distribution of Patient Ages (Unique PatientIDs)")
-                            fig_age.update_xaxes(title_text="Patient Age (Years)")
-                            st.plotly_chart(fig_age)
+                        # Patient Age distribution (ordered from youngest to oldest)
+                        age_data = df.drop_duplicates('PatientID')
+                        age_data = age_data[age_data['PatientAge_Numeric'].notna()]
+                        fig_age = px.histogram(age_data, x='PatientAge_Numeric',
+                                               title="Distribution of Patient Ages (Unique PatientIDs)")
+                        fig_age.update_xaxes(title_text="Patient Age (Years)")
+                        st.plotly_chart(fig_age)
 
-                        # LongitudinalTemporalOffsetFromEvent distribution
-                        fig_offset = px.histogram(df, x='LongitudinalTemporalOffsetFromEvent',
-                                                  title="Distribution of Days Since Diagnosis",
-                                                  labels={'LongitudinalTemporalOffsetFromEvent': 'Days Since Diagnosis'})
-                        st.plotly_chart(fig_offset)
+                    # LongitudinalTemporalOffsetFromEvent distribution
+                    fig_offset = px.histogram(df, x='LongitudinalTemporalOffsetFromEvent',
+                                              title="Study Distribution of Days Since Diagnosis",
+                                              labels={'LongitudinalTemporalOffsetFromEvent': 'Days Since Diagnosis'})
+                    st.plotly_chart(fig_offset)
 
-                        # Number of unique StudyDate values for each PatientID (sorted in descending order)
-                        study_dates_per_patient = df.groupby('PatientID')['StudyDate'].nunique().reset_index()
-                        study_dates_per_patient = study_dates_per_patient.rename(columns={'StudyDate': 'Number of Study Dates'})
-                        study_dates_per_patient = study_dates_per_patient.sort_values('Number of Study Dates', ascending=False)
-                        fig_study_dates = px.bar(study_dates_per_patient, x='PatientID', y='Number of Study Dates',
-                                                 title="Number of Unique Study Dates per Patient")
-                        st.plotly_chart(fig_study_dates)
+                    # Number of unique StudyDate values for each PatientID (sorted in descending order)
+                    study_dates_per_patient = df.groupby('PatientID')['StudyDate'].nunique().reset_index()
+                    study_dates_per_patient = study_dates_per_patient.rename(columns={'StudyDate': 'Number of Study Dates'})
+                    study_dates_per_patient = study_dates_per_patient.sort_values('Number of Study Dates', ascending=False)
+                    fig_study_dates = px.bar(study_dates_per_patient, x='PatientID', y='Number of Study Dates',
+                                             title="Number of Unique Study Dates per Patient")
+                    st.plotly_chart(fig_study_dates)
 
                 else:
                     st.error("Login failed. Please check your credentials.")
