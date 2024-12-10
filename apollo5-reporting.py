@@ -85,7 +85,6 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-#@st.cache_data
 def generate_monthly_report(name):
     # get list of all collections
     if name == "VAREPOP-APOLLO":
