@@ -88,13 +88,16 @@ def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 #@st.cache_data
 def generate_monthly_report(name):
     # get list of all collections
-    collections_json = nbia.getCollections()
-    collections = [item['Collection'] for item in collections_json]
+    if name == "VAREPOP-APOLLO":
+        collections = ['VAREPOP-APOLLO']
+    else:
+        collections_json = nbia.getCollections()
+        collections = [item['Collection'] for item in collections_json]
 
-    # select only APOLLO-5 collections
-    collectionSubset = [item for item in collections if name in item]
-    collections = collectionSubset
-    st.write(f"{len(collections)} APOLLO collections are being analyzed.")
+        # select only APOLLO collections
+        collectionSubset = [item for item in collections if name in item]
+        collections = collectionSubset
+    st.write(f"{len(collections)} APOLLO collection(s) are being analyzed.")
     st.write(collections)
 
     # get inventory of studies
@@ -145,6 +148,15 @@ def generate_monthly_report(name):
     # Merge the 'ImageCount' column from image_counts_by_study into apollo5_study_report
     apollo5_study_report = pd.merge(apollo5_study_report, image_counts_by_study, on='StudyInstanceUID', how='left')
 
+    # Create a DataFrame with unique modalities per Study UID
+    modalities_by_study = series_info.groupby('Study UID')['Modality'].apply(lambda x: ', '.join(x.unique())).reset_index()
+
+    # Rename columns for clarity and consistency
+    modalities_by_study.rename(columns={'Study UID': 'StudyInstanceUID', 'Modality': 'Unique Modalities'}, inplace=True)
+
+    # Merge the 'Unique Modalities' column from modalities_by_study into apollo5_study_report
+    apollo5_study_report = pd.merge(apollo5_study_report, modalities_by_study, on='StudyInstanceUID', how='left')
+
     # List of columns to drop
     columns_to_drop = ['Collection', 'AdmittingDiagnosesDescription', 'PatientName']
 
@@ -161,13 +173,13 @@ def generate_monthly_report(name):
     apollo5_study_report['PatientAge_Numeric'] = apollo5_study_report['PatientAge'].apply(preprocess_age)
 
     # Define the new order of columns
-    new_order = ['PatientID', 'Collection', 'Site', 'LongitudinalTemporalEventType', 'LongitudinalTemporalOffsetFromEvent', 'StudyDate', 'StudyInstanceUID', 'StudyDescription', 'SeriesCount', 'ImageCount', 'PatientAge', 'PatientAge_Numeric', 'PatientSex', 'EthnicGroup']
+    new_order = ['PatientID', 'Collection', 'Site', 'LongitudinalTemporalEventType', 'LongitudinalTemporalOffsetFromEvent', 'StudyDate', 'StudyInstanceUID', 'StudyDescription', 'SeriesCount', 'ImageCount', 'Unique Modalities', 'PatientAge', 'PatientAge_Numeric', 'PatientSex', 'EthnicGroup']
 
     # Reorder the columns
     apollo5_study_report = apollo5_study_report.reindex(columns=new_order)
 
     # save merged report to a CSV
-    csv_filename = f"apollo5-monthly-report_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
+    csv_filename = f"{name}-monthly-report_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
     apollo5_study_report.to_csv(csv_filename, index=False)
 
     return apollo5_study_report, csv_filename
@@ -268,6 +280,24 @@ def main():
                     fig_study_dates = px.bar(study_dates_per_patient, x='PatientID', y='Number of Study Dates',
                                              title="Number of Unique Study Dates per Patient")
                     st.plotly_chart(fig_study_dates)
+
+                    ## Modality charts
+                    # Flatten the Unique Modalities list
+                    modalities = df.assign(UniqueModalities=df['Unique Modalities'].str.split(', ')).explode('UniqueModalities')
+
+                    # Group by Collection and Modality
+                    modalities_by_collection = modalities.groupby(['Collection', 'UniqueModalities']).size().reset_index(name='Count')
+
+                    # Pivot for heatmap
+                    collection_heatmap = modalities_by_collection.pivot(index='UniqueModalities', columns='Collection', values='Count').fillna(0)
+
+                    # Heatmap by Collection
+                    fig_collection = px.imshow(collection_heatmap,
+                                               title='Frequency of Modality Presence in a Study Grouped by Collection',
+                                               labels={'x': 'Collection', 'y': 'Modality', 'color': 'Count'},
+                                               color_continuous_scale='Viridis')
+                    # display chart
+                    st.plotly_chart(fig_collection)
 
                 else:
                     st.error("Login failed. Please check your credentials.")
