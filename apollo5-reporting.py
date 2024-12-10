@@ -114,7 +114,7 @@ def generate_monthly_report(name):
     patient_id_list = ",".join(unique_patient_ids)
 
     # call getAdvancedQCSearch to get collection//site info for these subjects
-    criteria_values = [("patientID", patient_id_list)]
+    criteria_values = [("patientID", patient_id_list), ("qcstatus", "Visible")]
     series_site_info = nbia.getAdvancedQCSearch(criteria_values, format="df")
 
     # Rename the 'study' column to 'StudyInstanceUID'
