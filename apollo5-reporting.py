@@ -3,6 +3,7 @@ import pandas as pd
 from tcia_utils import nbia
 import datetime
 import plotly.express as px
+from concurrent.futures import ThreadPoolExecutor
 import os
 import glob
 from pandas.api.types import (
@@ -118,21 +119,25 @@ def generate_monthly_report(name):
     st.write(collections)
 
     # get inventory of studies
-    studies = pd.DataFrame()
-
-    for collection in collections:
-        studyDescription = nbia.getStudy(collection)
-        studies = pd.concat([studies, pd.DataFrame(studyDescription)], ignore_index=True)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        study_results = list(executor.map(nbia.getStudy, collections))
+    studies = pd.concat([pd.DataFrame(res) for res in study_results], ignore_index=True)
 
     # get unique patient IDs from studies dataframe
-    unique_patient_ids = studies['PatientID'].unique()
+    unique_patient_ids = studies['PatientID'].unique().tolist()
 
-    # Convert the unique patient IDs to a comma-separated string
-    patient_id_list = ",".join(unique_patient_ids)
+    # call getAdvancedQCSearch to get collection//site info for these subjects in parallel chunks
+    chunk_size = 500
+    patient_chunks = [unique_patient_ids[i:i + chunk_size] for i in range(0, len(unique_patient_ids), chunk_size)]
 
-    # call getAdvancedQCSearch to get collection//site info for these subjects
-    criteria_values = [("patientID", patient_id_list), ("qcstatus", "Visible")]
-    series_site_info = nbia.getAdvancedQCSearch(criteria_values, format="df")
+    def fetch_qc_search(ids):
+        id_list = ",".join(ids)
+        criteria = [("patientID", id_list), ("qcstatus", "Visible")]
+        return nbia.getAdvancedQCSearch(criteria, format="df")
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        qc_results = list(executor.map(fetch_qc_search, patient_chunks))
+    series_site_info = pd.concat(qc_results, ignore_index=True)
 
     # Rename the 'study' column to 'StudyInstanceUID'
     series_site_info = series_site_info.rename(columns={'study': 'StudyInstanceUID'})
@@ -140,8 +145,15 @@ def generate_monthly_report(name):
     # extract series column from series_site_info df to list
     series_list = series_site_info['series'].tolist()
 
-    # use nbia.getSeriesList to look up series metadata
-    series_info = nbia.getSeriesList(series_list, format="df")
+    # use nbia.getSeriesList to look up series metadata in parallel chunks
+    series_chunks = [series_list[i:i + chunk_size] for i in range(0, len(series_list), chunk_size)]
+
+    def fetch_series_info(s_list):
+        return nbia.getSeriesList(s_list, format="df")
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        series_results = list(executor.map(fetch_series_info, series_chunks))
+    series_info = pd.concat(series_results, ignore_index=True)
 
     # for each unique Study UID value, calculate the sum of the Number of images column
     image_counts_by_study = series_info.groupby('Study UID')['Number of images'].sum().reset_index()
@@ -211,13 +223,13 @@ def dashboard_filters(df):
 
     # Collection Filter
     collections = sorted(df['Collection'].dropna().unique())
-    selected_collections = st.sidebar.multiselect("Collection", collections, default=collections)
+    selected_collections = st.sidebar.multiselect("Collection", collections)
     if selected_collections:
         filtered_df = filtered_df[filtered_df['Collection'].isin(selected_collections)]
 
     # Site Filter
     sites = sorted(filtered_df['Site'].dropna().unique())
-    selected_sites = st.sidebar.multiselect("Site", sites, default=sites)
+    selected_sites = st.sidebar.multiselect("Site", sites)
     if selected_sites:
         filtered_df = filtered_df[filtered_df['Site'].isin(selected_sites)]
 
@@ -237,13 +249,13 @@ def dashboard_filters(df):
 
     # Patient Sex Filter
     sexes = sorted(df['PatientSex'].dropna().unique())
-    selected_sex = st.sidebar.multiselect("Patient Sex", sexes, default=sexes)
+    selected_sex = st.sidebar.multiselect("Patient Sex", sexes)
     if selected_sex:
         filtered_df = filtered_df[filtered_df['PatientSex'].isin(selected_sex)]
 
     # Ethnic Group Filter
     ethnicities = sorted(df['EthnicGroup'].dropna().unique())
-    selected_ethnic = st.sidebar.multiselect("Ethnic Group", ethnicities, default=ethnicities)
+    selected_ethnic = st.sidebar.multiselect("Ethnic Group", ethnicities)
     if selected_ethnic:
         filtered_df = filtered_df[filtered_df['EthnicGroup'].isin(selected_ethnic)]
 
@@ -272,6 +284,16 @@ def main():
 
         st.header("APOLLO-5 Summary Dashboard")
 
+        # Overall Totals
+        total_patients = df_filtered['PatientID'].nunique()
+        total_studies = df_filtered['StudyInstanceUID'].nunique()
+
+        col_total1, col_total2 = st.columns(2)
+        with col_total1:
+            st.metric("Total Unique Patients", total_patients)
+        with col_total2:
+            st.metric("Total Unique Studies", total_studies)
+
         # Summary Table: Count of unique PatientID and StudyInstanceUID by Collection and Site
         summary_table = df_filtered.groupby(['Collection', 'Site']).agg({
             'PatientID': 'nunique',
@@ -283,16 +305,6 @@ def main():
 
         st.subheader("Accrual Summary")
         st.table(summary_table)
-
-        # Overall Totals
-        total_patients = df_filtered['PatientID'].nunique()
-        total_studies = df_filtered['StudyInstanceUID'].nunique()
-
-        col_total1, col_total2 = st.columns(2)
-        with col_total1:
-            st.metric("Total Unique Patients", total_patients)
-        with col_total2:
-            st.metric("Total Unique Studies", total_studies)
 
         st.subheader("Distributions")
 
