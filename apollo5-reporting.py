@@ -171,8 +171,19 @@ def generate_monthly_report(name):
     # Remove duplicates based on 'StudyInstanceUID' and 'collectionSite'
     series_site_info = series_site_info.drop_duplicates(subset=['StudyInstanceUID', 'collectionSite'])
 
-    # Merge 'series_site_info' with 'studies' on 'StudyInstanceUID'
-    apollo5_study_report = pd.merge(studies, series_site_info, on='StudyInstanceUID', how='left')
+    # Split the 'collectionSite' column into 'Collection' and 'Site'
+    series_site_info[['Collection', 'Site']] = series_site_info['collectionSite'].str.split('//', expand=True)
+
+    # Group by StudyInstanceUID and aggregate Site and Collection
+    # Since we are told a StudyInstanceUID can't be in different Collections, we can just take the first Collection
+    series_site_info_agg = series_site_info.groupby('StudyInstanceUID').agg({
+        'Collection': 'first',
+        'Site': lambda x: ', '.join(sorted(x.unique()))
+    }).reset_index()
+
+    # Merge 'series_site_info_agg' with 'studies' on 'StudyInstanceUID' and 'Collection'
+    # This avoids duplicate Collection columns (Collection_x, Collection_y)
+    apollo5_study_report = pd.merge(studies, series_site_info_agg, on=['StudyInstanceUID', 'Collection'], how='left')
 
     # Merge the 'ImageCount' column from image_counts_by_study into apollo5_study_report
     apollo5_study_report = pd.merge(apollo5_study_report, image_counts_by_study, on='StudyInstanceUID', how='left')
@@ -187,16 +198,10 @@ def generate_monthly_report(name):
     apollo5_study_report = pd.merge(apollo5_study_report, modalities_by_study, on='StudyInstanceUID', how='left')
 
     # List of columns to drop
-    columns_to_drop = ['Collection', 'AdmittingDiagnosesDescription', 'PatientName']
+    columns_to_drop = ['AdmittingDiagnosesDescription', 'PatientName']
 
     # Drop columns if they exist
     apollo5_study_report.drop(columns=[col for col in columns_to_drop if col in apollo5_study_report.columns], inplace=True)
-
-    # Split the 'collectionSite' column into 'Collection' and 'Site'
-    apollo5_study_report[['Collection', 'Site']] = apollo5_study_report['collectionSite'].str.split('//', expand=True)
-
-    # Drop the original 'collectionSite' column
-    apollo5_study_report = apollo5_study_report.drop(columns=['collectionSite'])
 
     # Preprocess the PatientAge column
     apollo5_study_report['PatientAge_Numeric'] = apollo5_study_report['PatientAge'].apply(preprocess_age)
@@ -228,10 +233,17 @@ def dashboard_filters(df):
         filtered_df = filtered_df[filtered_df['Collection'].isin(selected_collections)]
 
     # Site Filter
-    sites = sorted(filtered_df['Site'].dropna().unique())
-    selected_sites = st.sidebar.multiselect("Site", sites)
+    all_sites = set()
+    for s_list in df['Site'].dropna().unique():
+        for s in str(s_list).split(', '):
+            all_sites.add(s)
+    sorted_sites = sorted(list(all_sites))
+    selected_sites = st.sidebar.multiselect("Site", sorted_sites)
     if selected_sites:
-        filtered_df = filtered_df[filtered_df['Site'].isin(selected_sites)]
+        mask = filtered_df['Site'].apply(
+            lambda x: any(s in str(x).split(', ') for s in selected_sites) if pd.notna(x) else False
+        )
+        filtered_df = filtered_df[mask]
 
     # Modality Filter (Multi-select)
     all_modalities = set()
