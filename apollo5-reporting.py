@@ -155,6 +155,32 @@ def generate_monthly_report(name):
         series_results = list(executor.map(fetch_series_info, series_chunks))
     series_info = pd.concat(series_results, ignore_index=True)
 
+    # Create series-level report
+    series_report_site_info = series_site_info.copy()
+    series_report_site_info[['Collection', 'Site']] = series_report_site_info['collectionSite'].str.split('//', expand=True)
+
+    # Merge series_info with site info
+    # Determine the series UID column in series_info
+    series_uid_col = 'Series Instance UID' if 'Series Instance UID' in series_info.columns else ('SeriesInstanceUID' if 'SeriesInstanceUID' in series_info.columns else None)
+
+    if series_uid_col:
+        apollo5_series_report = pd.merge(
+            series_info,
+            series_report_site_info[['series', 'Collection', 'Site']],
+            left_on=series_uid_col,
+            right_on='series',
+            how='left'
+        )
+        if 'series' in apollo5_series_report.columns and series_uid_col != 'series':
+            apollo5_series_report.drop(columns=['series'], inplace=True)
+    else:
+        # Fallback if we can't find the column, though unlikely
+        apollo5_series_report = series_info.copy()
+
+    # Save series report to CSV
+    series_csv_filename = f"{name}-series-report_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
+    apollo5_series_report.to_csv(series_csv_filename, index=False)
+
     # for each unique Study UID value, calculate the sum of the Number of images column
     image_counts_by_study = series_info.groupby('Study UID')['Number of images'].sum().reset_index()
 
@@ -216,7 +242,7 @@ def generate_monthly_report(name):
     csv_filename = f"{name}-monthly-report_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
     apollo5_study_report.to_csv(csv_filename, index=False)
 
-    return apollo5_study_report, csv_filename
+    return apollo5_study_report, csv_filename, apollo5_series_report, series_csv_filename
 
 def dashboard_filters(df):
     """
@@ -421,10 +447,10 @@ def main():
 
                     if selected_report == "APOLLO-5 Report":
                         with st.spinner("Generating APOLLO-5 Report..."):
-                            df, csv_filename = generate_monthly_report("APOLLO-5")
+                            df, csv_filename, df_series, series_csv_filename = generate_monthly_report("APOLLO-5")
                     if selected_report == "VAREPOP-APOLLO":
                         with st.spinner("Generating VAREPOP-APOLLO Report..."):
-                            df, csv_filename = generate_monthly_report("VAREPOP-APOLLO")
+                            df, csv_filename, df_series, series_csv_filename = generate_monthly_report("VAREPOP-APOLLO")
 
                     st.success("Monthly Report generated successfully!")
 
@@ -436,12 +462,21 @@ def main():
                     #st.dataframe(filter_dataframe(df))
 
                     # Offer CSV download
-                    st.download_button(
-                        label="Download CSV",
-                        data=df.to_csv(index=False),
-                        file_name=csv_filename,
-                        mime="text/csv"
-                    )
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        st.download_button(
+                            label="Download Study-level CSV",
+                            data=df.to_csv(index=False),
+                            file_name=csv_filename,
+                            mime="text/csv"
+                        )
+                    with col_dl2:
+                        st.download_button(
+                            label="Download Series-level CSV",
+                            data=df_series.to_csv(index=False),
+                            file_name=series_csv_filename,
+                            mime="text/csv"
+                        )
 
                     # Visualizations
                     st.subheader("Report Summary Stats")
