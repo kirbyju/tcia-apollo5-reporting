@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from tcia_utils import nbia
+import nbia_utils as nbia
 import datetime
 import plotly.express as px
 from concurrent.futures import ThreadPoolExecutor
