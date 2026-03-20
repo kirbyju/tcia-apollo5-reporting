@@ -78,9 +78,7 @@ def getToken(user: str = "", pw: str = "", api_url: str = "", return_values: boo
     else:
         userName = input("Enter User: ")
 
-    if userName == "nbia_guest":
-        passWord = "ItsBetweenUAndMe"
-    elif pw == "":
+    if pw == "":
         import getpass
         passWord = getpass.getpass(prompt='Enter Password: ')
     else:
@@ -260,14 +258,22 @@ def _fetch_and_parse_criteria(api_url="nbia", force_refresh: bool = False) -> di
 def getCollections(format: str = "list", api_url="nbia", force_refresh: bool = False):
     all_criteria = _fetch_and_parse_criteria(api_url=api_url, force_refresh=force_refresh)
     collection_data = all_criteria.get("Collection", [])
+
+    # Process collection names to remove site information (e.g., Collection//Site -> Collection)
+    processed_collections = sorted(list(set([c.split('//')[0] for c in collection_data])))
+
     if format.lower() in ["dataframe", "df"]:
+        # Maintain the original breakdown for dataframe format if needed,
+        # but the request implies we should return only the collection name.
         collections, sites = [], []
         for item in collection_data:
             parts = item.split('//')
             collections.append(parts[0])
             sites.append(parts[1] if len(parts) > 1 else None)
         return pd.DataFrame({"Collection": collections, "Site": sites})
-    return [{"Collection": c} for c in collection_data]
+
+    # Return as list of dicts with 'Collection' key, using only unique collection names
+    return [{"Collection": c} for c in processed_collections]
 
 def getAdvancedQCSearch(criteria_values, api_url="", format="", input_type={}):
     input_type_map = {

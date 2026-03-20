@@ -308,7 +308,7 @@ def dashboard_filters(df):
 def main():
 
     st.set_page_config(page_title="TCIA APOLLO Reporting", layout="wide")
-    st.sidebar.image("https://www.cancerimagingarchive.net/wp-content/uploads/2021/06/TCIA-Logo-01.png", use_column_width=True)
+    st.sidebar.image("https://www.cancerimagingarchive.net/wp-content/uploads/2021/06/TCIA-Logo-01.png")
     st.title("TCIA APOLLO Reporting")
 
     # Load cached data for dashboard
