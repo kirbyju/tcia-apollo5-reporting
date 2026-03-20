@@ -310,7 +310,25 @@ def getStudy(collection = "", patientId = "", studyUid = "", api_url = "", forma
         options['PatientID'] = patientId
     if studyUid:
         options['StudyInstanceUID'] = studyUid
-    return queryData(endpoint, options, api_url, format)
+
+    data = queryData(endpoint, options, api_url, format)
+
+    # If returning a DataFrame, standardize column names
+    if isinstance(data, pd.DataFrame):
+        column_mapping = {
+            'StudyInstanceUID': 'Study UID',
+            'ImageCount': 'Number of images'
+        }
+        data.rename(columns=column_mapping, inplace=True)
+    elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        # If returning a list of dicts, standardize keys
+        for item in data:
+            if 'StudyInstanceUID' in item:
+                item['Study UID'] = item.pop('StudyInstanceUID')
+            if 'ImageCount' in item:
+                item['Number of images'] = item.pop('ImageCount')
+
+    return data
 
 def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Optional[pd.DataFrame]:
     chunk_size = 10000
@@ -327,11 +345,26 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
         return None
     df = pd.concat(dfs, ignore_index=True)
     column_mapping = {
-        'Patient ID': 'PatientID', 'Study Instance UID': 'StudyInstanceUID', 'Series Instance UID': 'SeriesInstanceUID',
-        'Study Date': 'StudyDate', 'Series Date': 'SeriesDate', 'Image Count': 'ImageCount', 'File Size': 'FileSize',
-        'Date Released': 'DateReleased', 'Body Part Examined': 'BodyPartExamined', 'Series Description': 'SeriesDescription',
-        'Manufacturer Model Name': 'ManufacturerModelName', 'Software Versions': 'SoftwareVersions',
-        'License Name': 'LicenseName', 'License URI': 'LicenseURI', 'Collection URI': 'DataDescriptionURI',
+        'Patient ID': 'PatientID',
+        'PatientID': 'PatientID',
+        'Study Instance UID': 'Study UID',
+        'StudyInstanceUID': 'Study UID',
+        'Series Instance UID': 'SeriesInstanceUID',
+        'SeriesInstanceUID': 'SeriesInstanceUID',
+        'Study Date': 'StudyDate',
+        'Series Date': 'SeriesDate',
+        'Image Count': 'Number of images',
+        'ImageCount': 'Number of images',
+        'Number of Images': 'Number of images',
+        'File Size': 'FileSize',
+        'Date Released': 'DateReleased',
+        'Body Part Examined': 'BodyPartExamined',
+        'Series Description': 'SeriesDescription',
+        'Manufacturer Model Name': 'ManufacturerModelName',
+        'Software Versions': 'SoftwareVersions',
+        'License Name': 'LicenseName',
+        'License URI': 'LicenseURI',
+        'Collection URI': 'DataDescriptionURI',
     }
     df.rename(columns=column_mapping, inplace=True)
     return df
