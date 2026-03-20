@@ -43,8 +43,6 @@ def log_request_exception(err: requests.exceptions.RequestException) -> None:
 
 def setApiUrl(endpoint, api_url = "nbia"):
     if api_url == "nlst":
-        if 'nlst_token_exp_time' not in globals():
-            getToken(user="nbia_guest", api_url="nlst")
         if 'nlst_token_exp_time' in globals() and datetime.now() > nlst_token_exp_time:
             refreshToken(api_url = "nlst")
     else:
@@ -76,11 +74,12 @@ def getToken(user: str = "", pw: str = "", api_url: str = "", return_values: boo
     if user != "":
         userName = user
     else:
-        userName = input("Enter User: ")
+        _log.error("Username not provided to getToken()")
+        return None
 
     if pw == "":
-        import getpass
-        passWord = getpass.getpass(prompt='Enter Password: ')
+        _log.error("Password not provided to getToken()")
+        return None
     else:
         passWord = pw
 
@@ -312,22 +311,6 @@ def getStudy(collection = "", patientId = "", studyUid = "", api_url = "", forma
         options['StudyInstanceUID'] = studyUid
 
     data = queryData(endpoint, options, api_url, format)
-
-    # If returning a DataFrame, standardize column names
-    if isinstance(data, pd.DataFrame):
-        column_mapping = {
-            'StudyInstanceUID': 'Study UID',
-            'ImageCount': 'Number of images'
-        }
-        data.rename(columns=column_mapping, inplace=True)
-    elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-        # If returning a list of dicts, standardize keys
-        for item in data:
-            if 'StudyInstanceUID' in item:
-                item['Study UID'] = item.pop('StudyInstanceUID')
-            if 'ImageCount' in item:
-                item['Number of images'] = item.pop('ImageCount')
-
     return data
 
 def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Optional[pd.DataFrame]:
@@ -346,16 +329,11 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
     df = pd.concat(dfs, ignore_index=True)
     column_mapping = {
         'Patient ID': 'PatientID',
-        'PatientID': 'PatientID',
         'Study Instance UID': 'Study UID',
-        'StudyInstanceUID': 'Study UID',
         'Series Instance UID': 'SeriesInstanceUID',
-        'SeriesInstanceUID': 'SeriesInstanceUID',
         'Study Date': 'StudyDate',
         'Series Date': 'SeriesDate',
         'Image Count': 'Number of images',
-        'ImageCount': 'Number of images',
-        'Number of Images': 'Number of images',
         'File Size': 'FileSize',
         'Date Released': 'DateReleased',
         'Body Part Examined': 'BodyPartExamined',
@@ -367,4 +345,11 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
         'Collection URI': 'DataDescriptionURI',
     }
     df.rename(columns=column_mapping, inplace=True)
+
+    # Ensure BOTH 'Study UID' and 'StudyInstanceUID' exist if one of them is present
+    if 'Study UID' in df.columns and 'StudyInstanceUID' not in df.columns:
+        df['StudyInstanceUID'] = df['Study UID']
+    elif 'StudyInstanceUID' in df.columns and 'Study UID' not in df.columns:
+        df['Study UID'] = df['StudyInstanceUID']
+
     return df
