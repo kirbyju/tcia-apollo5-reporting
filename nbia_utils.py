@@ -352,4 +352,10 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
     elif 'StudyInstanceUID' in df.columns and 'Study UID' not in df.columns:
         df['Study UID'] = df['StudyInstanceUID']
 
+    # Ensure BOTH 'Number of images' and 'ImageCount' exist
+    if 'Number of images' in df.columns and 'ImageCount' not in df.columns:
+        df['ImageCount'] = df['Number of images']
+    elif 'ImageCount' in df.columns and 'Number of images' not in df.columns:
+        df['Number of images'] = df['ImageCount']
+
     return df
