@@ -161,11 +161,17 @@ def generate_monthly_report(name):
 
     # Merge series_info with site info
     # Determine the series UID column in series_info
-    series_uid_col = 'Series Instance UID' if 'Series Instance UID' in series_info.columns else ('SeriesInstanceUID' if 'SeriesInstanceUID' in series_info.columns else None)
+    series_uid_col = 'SeriesInstanceUID' if 'SeriesInstanceUID' in series_info.columns else ('Series Instance UID' if 'Series Instance UID' in series_info.columns else None)
+
+    # Drop Collection and Site from series_info before merge if they already exist to avoid duplicates
+    series_info_clean = series_info.copy()
+    for col in ['Collection', 'Site']:
+        if col in series_info_clean.columns:
+            series_info_clean.drop(columns=[col], inplace=True)
 
     if series_uid_col:
         apollo5_series_report = pd.merge(
-            series_info,
+            series_info_clean,
             series_report_site_info[['series', 'Collection', 'Site']],
             left_on=series_uid_col,
             right_on='series',
@@ -175,20 +181,18 @@ def generate_monthly_report(name):
             apollo5_series_report.drop(columns=['series'], inplace=True)
     else:
         # Fallback if we can't find the column, though unlikely
-        apollo5_series_report = series_info.copy()
+        apollo5_series_report = series_info_clean.copy()
+
+    # Drop AnnotationsFlag if it exists
+    if 'AnnotationsFlag' in apollo5_series_report.columns:
+        apollo5_series_report.drop(columns=['AnnotationsFlag'], inplace=True)
 
     # Save series report to CSV
     series_csv_filename = f"{name}-series-report_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M')}.csv"
     apollo5_series_report.to_csv(series_csv_filename, index=False)
 
     # for each unique Study UID value, calculate the sum of the Number of images column
-    image_counts_by_study = series_info.groupby('Study UID')['Number of images'].sum().reset_index()
-
-    # rename Number of images to ImageCount
-    image_counts_by_study = image_counts_by_study.rename(columns={'Number of images': 'ImageCount'})
-
-    # rename 'Study UID' to 'StudyInstanceUID'
-    image_counts_by_study = image_counts_by_study.rename(columns={'Study UID': 'StudyInstanceUID'})
+    image_counts_by_study = series_info.groupby('StudyInstanceUID')['ImageCount'].sum().reset_index()
 
     # Drop all other columns except for 'StudyInstanceUID' and 'collectionSite'
     columns_to_keep = ['StudyInstanceUID', 'collectionSite']
@@ -215,10 +219,10 @@ def generate_monthly_report(name):
     apollo5_study_report = pd.merge(apollo5_study_report, image_counts_by_study, on='StudyInstanceUID', how='left')
 
     # Create a DataFrame with unique modalities per Study UID
-    modalities_by_study = series_info.groupby('Study UID')['Modality'].apply(lambda x: ', '.join(x.unique())).reset_index()
+    modalities_by_study = series_info.groupby('StudyInstanceUID')['Modality'].apply(lambda x: ', '.join(x.unique())).reset_index()
 
     # Rename columns for clarity and consistency
-    modalities_by_study.rename(columns={'Study UID': 'StudyInstanceUID', 'Modality': 'Unique Modalities'}, inplace=True)
+    modalities_by_study.rename(columns={'Modality': 'Unique Modalities'}, inplace=True)
 
     # Merge the 'Unique Modalities' column from modalities_by_study into apollo5_study_report
     apollo5_study_report = pd.merge(apollo5_study_report, modalities_by_study, on='StudyInstanceUID', how='left')

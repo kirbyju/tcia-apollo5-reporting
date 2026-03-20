@@ -329,11 +329,11 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
     df = pd.concat(dfs, ignore_index=True)
     column_mapping = {
         'Patient ID': 'PatientID',
-        'Study Instance UID': 'Study UID',
+        'Study Instance UID': 'StudyInstanceUID',
         'Series Instance UID': 'SeriesInstanceUID',
         'Study Date': 'StudyDate',
         'Series Date': 'SeriesDate',
-        'Image Count': 'Number of images',
+        'Image Count': 'ImageCount',
         'File Size': 'FileSize',
         'Date Released': 'DateReleased',
         'Body Part Examined': 'BodyPartExamined',
@@ -345,17 +345,4 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
         'Collection URI': 'DataDescriptionURI',
     }
     df.rename(columns=column_mapping, inplace=True)
-
-    # Ensure BOTH 'Study UID' and 'StudyInstanceUID' exist if one of them is present
-    if 'Study UID' in df.columns and 'StudyInstanceUID' not in df.columns:
-        df['StudyInstanceUID'] = df['Study UID']
-    elif 'StudyInstanceUID' in df.columns and 'Study UID' not in df.columns:
-        df['Study UID'] = df['StudyInstanceUID']
-
-    # Ensure BOTH 'Number of images' and 'ImageCount' exist
-    if 'Number of images' in df.columns and 'ImageCount' not in df.columns:
-        df['ImageCount'] = df['Number of images']
-    elif 'ImageCount' in df.columns and 'Number of images' not in df.columns:
-        df['Number of images'] = df['ImageCount']
-
     return df
