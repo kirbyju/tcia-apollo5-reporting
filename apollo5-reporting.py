@@ -452,50 +452,12 @@ def main():
                         with st.spinner("Generating VAREPOP-APOLLO Report..."):
                             df, csv_filename, df_series, series_csv_filename = generate_monthly_report("VAREPOP-APOLLO")
 
+                    # Store results in session state to persist after button clicks
+                    st.session_state['report_df'] = df
+                    st.session_state['report_csv_filename'] = csv_filename
+                    st.session_state['report_df_series'] = df_series
+                    st.session_state['report_series_csv_filename'] = series_csv_filename
                     st.success("Monthly Report generated successfully!")
-
-                    # Display the dataframe
-                    st.subheader("Monthly Report Data")
-                    st.dataframe(df)
-
-                    # placeholder to make this filterable later
-                    #st.dataframe(filter_dataframe(df))
-
-                    # Offer CSV download
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1:
-                        st.download_button(
-                            label="Download Study-level CSV",
-                            data=df.to_csv(index=False),
-                            file_name=csv_filename,
-                            mime="text/csv"
-                        )
-                    with col_dl2:
-                        st.download_button(
-                            label="Download Series-level CSV",
-                            data=df_series.to_csv(index=False),
-                            file_name=series_csv_filename,
-                            mime="text/csv"
-                        )
-
-                    # Visualizations
-                    st.subheader("Report Summary Stats")
-                    st.write("Summary statistics for the freshly generated report.")
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        # PatientID by Collection
-                        patient_counts = df.groupby('Collection')['PatientID'].nunique().reset_index()
-                        fig_collection = px.pie(patient_counts, values='PatientID', names='Collection',
-                                                title="PatientID by Collection")
-                        st.plotly_chart(fig_collection)
-
-                    with col2:
-                        # Image Count by Collection
-                        fig_image_count = px.bar(df.groupby('Collection')['ImageCount'].sum().reset_index(),
-                                                 x='Collection', y='ImageCount', title="Total Image Count by Collection")
-                        st.plotly_chart(fig_image_count)
 
                 else:
                     st.error("Login failed. Please check your credentials.")
@@ -503,6 +465,53 @@ def main():
                 st.error(f"An error occurred: {str(e)}")
         else:
             st.warning("Please enter your username and password.")
+
+    # Display results if they exist in session state
+    if 'report_df' in st.session_state:
+        df = st.session_state['report_df']
+        csv_filename = st.session_state['report_csv_filename']
+        df_series = st.session_state['report_df_series']
+        series_csv_filename = st.session_state['report_series_csv_filename']
+
+        # Display the dataframe
+        st.subheader("Monthly Report Data")
+        st.dataframe(df)
+
+        # Offer CSV download
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                label="Download Study-level CSV",
+                data=df.to_csv(index=False),
+                file_name=csv_filename,
+                mime="text/csv"
+            )
+        with col_dl2:
+            st.download_button(
+                label="Download Series-level CSV",
+                data=df_series.to_csv(index=False),
+                file_name=series_csv_filename,
+                mime="text/csv"
+            )
+
+        # Visualizations
+        st.subheader("Report Summary Stats")
+        st.write("Summary statistics for the freshly generated report.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # PatientID by Collection
+            patient_counts = df.groupby('Collection')['PatientID'].nunique().reset_index()
+            fig_collection = px.pie(patient_counts, values='PatientID', names='Collection',
+                                    title="PatientID by Collection")
+            st.plotly_chart(fig_collection)
+
+        with col2:
+            # Image Count by Collection
+            fig_image_count = px.bar(df.groupby('Collection')['ImageCount'].sum().reset_index(),
+                                     x='Collection', y='ImageCount', title="Total Image Count by Collection")
+            st.plotly_chart(fig_image_count)
 
 if __name__ == "__main__":
     main()
