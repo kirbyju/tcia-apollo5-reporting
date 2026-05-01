@@ -13,14 +13,14 @@ from pandas.api.types import (
     is_object_dtype,
 )
 
-def get_latest_report(report_type="monthly"):
+def get_latest_report(name="APOLLO-5", report_type="monthly"):
     """
-    Finds the most recent report CSV file based on report_type.
+    Finds the most recent report CSV file based on report_type and name.
     """
     if report_type == "monthly":
-        pattern = 'APOLLO-5-monthly-report_*.csv'
+        pattern = f'{name}-monthly-report_*.csv'
     elif report_type == "series":
-        pattern = 'APOLLO-5-series-report_*.csv'
+        pattern = f'{name}-series-report_*.csv'
     else:
         return None
 
@@ -439,7 +439,7 @@ def generate_monthly_report(name):
 
     return apollo5_study_report, csv_filename, apollo5_series_report, series_csv_filename
 
-def dashboard_filters(df):
+def dashboard_filters(df, version=0):
     """
     Creates global filters for the dashboard and returns filtered dataframe.
     """
@@ -449,7 +449,7 @@ def dashboard_filters(df):
 
     # Collection Filter
     collections = sorted(df['Collection'].dropna().unique())
-    selected_collections = st.sidebar.multiselect("Collection", collections)
+    selected_collections = st.sidebar.multiselect("Collection", collections, key=f"col_{version}")
     if selected_collections:
         filtered_df = filtered_df[filtered_df['Collection'].isin(selected_collections)]
 
@@ -459,7 +459,7 @@ def dashboard_filters(df):
         for s in str(s_list).split(', '):
             all_sites.add(s)
     sorted_sites = sorted(list(all_sites))
-    selected_sites = st.sidebar.multiselect("Site", sorted_sites)
+    selected_sites = st.sidebar.multiselect("Site", sorted_sites, key=f"site_{version}")
     if selected_sites:
         mask = filtered_df['Site'].apply(
             lambda x: any(s in str(x).split(', ') for s in selected_sites) if pd.notna(x) else False
@@ -472,7 +472,7 @@ def dashboard_filters(df):
         for m in m_list.split(', '):
             all_modalities.add(m)
     sorted_modalities = sorted(list(all_modalities))
-    selected_modalities = st.sidebar.multiselect("Unique Modalities", sorted_modalities)
+    selected_modalities = st.sidebar.multiselect("Unique Modalities", sorted_modalities, key=f"mod_{version}")
     if selected_modalities:
         # Patient matches if ANY of the selected modalities are in their Unique Modalities string
         mask = filtered_df['Unique Modalities'].apply(
@@ -482,22 +482,22 @@ def dashboard_filters(df):
 
     # Patient Sex Filter
     sexes = sorted(df['PatientSex'].dropna().unique())
-    selected_sex = st.sidebar.multiselect("Patient Sex", sexes)
+    selected_sex = st.sidebar.multiselect("Patient Sex", sexes, key=f"sex_{version}")
     if selected_sex:
         filtered_df = filtered_df[filtered_df['PatientSex'].isin(selected_sex)]
 
     # Ethnic Group Filter
     ethnicities = sorted(df['EthnicGroup'].dropna().unique())
-    selected_ethnic = st.sidebar.multiselect("Ethnic Group", ethnicities)
+    selected_ethnic = st.sidebar.multiselect("Ethnic Group", ethnicities, key=f"ethnic_{version}")
     if selected_ethnic:
         filtered_df = filtered_df[filtered_df['EthnicGroup'].isin(selected_ethnic)]
 
     # Age Filter
     min_age = int(df['PatientAge_Numeric'].min()) if not df['PatientAge_Numeric'].dropna().empty else 0
     max_age = int(df['PatientAge_Numeric'].max()) if not df['PatientAge_Numeric'].dropna().empty else 120
-    if min_age > max_age:
-        min_age, max_age = max_age, min_age
-    selected_age = st.sidebar.slider("Patient Age", min_age, max_age, (min_age, max_age))
+    if min_age >= max_age:
+        max_age = min_age + 1
+    selected_age = st.sidebar.slider("Patient Age", min_age, max_age, (min_age, max_age), key=f"age_{version}")
     filtered_df = filtered_df[filtered_df['PatientAge_Numeric'].between(selected_age[0], selected_age[1])]
 
     return filtered_df, selected_collections, selected_sites
@@ -508,135 +508,13 @@ def main():
     st.sidebar.image("https://www.cancerimagingarchive.net/wp-content/uploads/2021/06/TCIA-Logo-01.png")
     st.title("TCIA APOLLO Reporting")
 
-    # Load cached data for dashboard
-    latest_report = get_latest_report()
-    if latest_report:
-        st.info(f"Displaying summary from the latest APOLLO-5 Report: {latest_report}")
-        cached_df = pd.read_csv(latest_report)
+    # 1. Initialize session state
+    if 'filter_version' not in st.session_state:
+        st.session_state['filter_version'] = 0
+    if 'fresh_report_run' not in st.session_state:
+        st.session_state['fresh_report_run'] = False
 
-        # Apply filters
-        df_filtered, selected_collections, selected_sites = dashboard_filters(cached_df)
-
-        st.header("APOLLO-5 Summary Dashboard")
-
-        # Overall Totals
-        total_patients = df_filtered['PatientID'].nunique()
-        total_studies = df_filtered['StudyInstanceUID'].nunique()
-
-        col_total1, col_total2 = st.columns(2)
-        with col_total1:
-            st.metric("Total Unique Patients", total_patients)
-        with col_total2:
-            st.metric("Total Unique Studies", total_studies)
-
-        # Summary Table: Count of unique PatientID and StudyInstanceUID by Collection and Site
-        summary_table = df_filtered.groupby(['Collection', 'Site']).agg({
-            'PatientID': 'nunique',
-            'StudyInstanceUID': 'nunique'
-        }).reset_index().rename(columns={
-            'PatientID': 'Unique Patients',
-            'StudyInstanceUID': 'Unique Studies'
-        })
-
-        st.subheader("Accrual Summary")
-        st.table(summary_table)
-
-        st.subheader("Distributions")
-
-        col_dist1, col_dist2 = st.columns(2)
-
-        with col_dist1:
-            # PatientID by PatientSex (Unique Patients)
-            sex_counts = df_filtered.drop_duplicates('PatientID')['PatientSex'].value_counts().reset_index()
-            sex_counts.columns = ['PatientSex', 'Count']
-            fig_sex = px.pie(sex_counts, values='Count', names='PatientSex', title="PatientID by PatientSex")
-            st.plotly_chart(fig_sex)
-
-            # PatientID by EthnicGroup (Unique Patients)
-            ethnic_counts = df_filtered.drop_duplicates('PatientID')['EthnicGroup'].value_counts().reset_index()
-            ethnic_counts.columns = ['EthnicGroup', 'Count']
-            fig_ethnic = px.pie(ethnic_counts, values='Count', names='EthnicGroup', title="PatientID by EthnicGroup")
-            st.plotly_chart(fig_ethnic)
-
-        with col_dist2:
-            # StudyInstanceUID by PatientAge
-            # Histogram showing distribution of ages across all studies
-            fig_age = px.histogram(df_filtered, x='PatientAge_Numeric',
-                                   title="StudyInstanceUID by PatientAge",
-                                   labels={'PatientAge_Numeric': 'Patient Age (Years)'})
-            st.plotly_chart(fig_age)
-
-            # Distribution of visits per Patient (Unique StudyDates per PatientID)
-            visits_per_patient = df_filtered.groupby('PatientID')['StudyDate'].nunique().reset_index()
-            visits_per_patient.columns = ['PatientID', 'Unique Study Dates']
-            # We want to see how many patients have 1 visit, 2 visits, etc.
-            fig_visits = px.histogram(visits_per_patient, x='Unique Study Dates',
-                                       title="Distribution of Visits per Patient",
-                                       labels={'Unique Study Dates': 'Number of Unique Study Dates'})
-            st.plotly_chart(fig_visits)
-
-        st.subheader("Annotation Progress Tracker")
-        st.write("Number of unique Study Dates containing the selected modality per patient.")
-        modality_to_track = st.radio("Select Modality to Track", ('RTSTRUCT', 'SEG'))
-
-        # Filter for studies containing the selected modality
-        mask_mod = df_filtered['Unique Modalities'].apply(
-            lambda x: modality_to_track in str(x).split(', ') if pd.notna(x) else False
-        )
-        mod_filtered = df_filtered[mask_mod]
-
-        # Count unique StudyDates per patient for this modality
-        mod_counts = mod_filtered.groupby('PatientID')['StudyDate'].nunique().reset_index()
-        mod_counts.columns = ['PatientID', 'Count']
-
-        # We need to include patients who have 0 studies with this modality
-        all_patients = pd.DataFrame(df_filtered['PatientID'].unique(), columns=['PatientID'])
-        mod_counts = pd.merge(all_patients, mod_counts, on='PatientID', how='left').fillna(0)
-
-        # Categorize into 0, 1, 2+
-        def categorize(count):
-            if count == 0: return '0 visits'
-            if count == 1: return '1 visit'
-            return '2+ visits'
-
-        mod_counts['Category'] = mod_counts['Count'].apply(categorize)
-        progress_data = mod_counts['Category'].value_counts().reset_index()
-        progress_data.columns = ['Category', 'Patient Count']
-
-        # Ensure all categories are represented for consistent plotting
-        for cat in ['0 visits', '1 visit', '2+ visits']:
-            if cat not in progress_data['Category'].values:
-                progress_data = pd.concat([progress_data, pd.DataFrame([{'Category': cat, 'Patient Count': 0}])], ignore_index=True)
-
-        # Sort for better display
-        progress_data['sort_idx'] = progress_data['Category'].map({'0 visits': 0, '1 visit': 1, '2+ visits': 2})
-        progress_data = progress_data.sort_values('sort_idx')
-
-        fig_progress = px.bar(progress_data, x='Category', y='Patient Count',
-                              title=f"Patients with {modality_to_track} Annotations",
-                              color='Category',
-                              color_discrete_map={'0 visits': 'red', '1 visit': 'orange', '2+ visits': 'green'})
-        st.plotly_chart(fig_progress)
-
-        # What Changed section for Dashboard
-        latest_series_report = get_latest_report(report_type="series")
-        if latest_series_report:
-            cached_series_df = pd.read_csv(latest_series_report)
-            # Filter series data based on dashboard filters (Collection, Site)
-            if selected_collections:
-                cached_series_df = cached_series_df[cached_series_df['Collection'].isin(selected_collections)]
-            if selected_sites:
-                mask_s = cached_series_df['Site'].apply(
-                    lambda x: any(s in str(x).split(', ') for s in selected_sites) if pd.notna(x) else False
-                )
-                cached_series_df = cached_series_df[mask_s]
-
-            display_what_changed(cached_series_df)
-
-    else:
-        st.warning("No previous APOLLO-5 reports found. Please generate a report to populate the dashboard.")
-
-    # Sidebar for login
+    # 2. Sidebar for login and report selection
     with st.sidebar:
         st.header("Login")
         username = st.text_input("Username")
@@ -644,89 +522,177 @@ def main():
 
         # Report selection dropdown
         report_options = ["APOLLO-5 Report", "VAREPOP-APOLLO"]
-        selected_report = st.selectbox("Select Report", report_options)
+        selected_report_display = st.selectbox("Select Report", report_options)
+        selected_report_name = "APOLLO-5" if selected_report_display == "APOLLO-5 Report" else "VAREPOP-APOLLO"
 
         # Generate Report button
         generate_button = st.button("Generate Report")
 
-    # Main content area
+    # 3. Report generation logic
     if generate_button:
         if username and password:
             try:
                 status_code = nbia.getToken(username, password)
                 if status_code == 200:
-                    st.success("Login successful!")
+                    st.sidebar.success("Login successful!")
+                    with st.spinner(f"Generating {selected_report_name} Report..."):
+                        df, csv_filename, df_series, series_csv_filename = generate_monthly_report(selected_report_name)
 
-                    if selected_report == "APOLLO-5 Report":
-                        with st.spinner("Generating APOLLO-5 Report..."):
-                            df, csv_filename, df_series, series_csv_filename = generate_monthly_report("APOLLO-5")
-                    if selected_report == "VAREPOP-APOLLO":
-                        with st.spinner("Generating VAREPOP-APOLLO Report..."):
-                            df, csv_filename, df_series, series_csv_filename = generate_monthly_report("VAREPOP-APOLLO")
-
-                    # Store results in session state to persist after button clicks
                     st.session_state['report_df'] = df
                     st.session_state['report_csv_filename'] = csv_filename
                     st.session_state['report_df_series'] = df_series
                     st.session_state['report_series_csv_filename'] = series_csv_filename
-                    st.success("Monthly Report generated successfully!")
-
+                    st.session_state['current_report_name'] = selected_report_name
+                    st.session_state['fresh_report_run'] = True
+                    st.session_state['filter_version'] += 1
+                    st.rerun()
                 else:
-                    st.error("Login failed. Please check your credentials.")
+                    st.sidebar.error("Login failed. Please check your credentials.")
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
+                st.sidebar.error(f"An error occurred: {str(e)}")
         else:
-            st.warning("Please enter your username and password.")
+            st.sidebar.warning("Please enter your username and password.")
 
-    # Display results if they exist in session state
-    if 'report_df' in st.session_state:
+    # 4. Load data if selection changed or not already loaded
+    if st.session_state.get('current_report_name') != selected_report_name:
+        latest_report = get_latest_report(selected_report_name)
+        if latest_report:
+            st.session_state['report_df'] = pd.read_csv(latest_report)
+            st.session_state['report_csv_filename'] = latest_report
+
+            latest_series = get_latest_report(selected_report_name, report_type="series")
+            if latest_series:
+                st.session_state['report_df_series'] = pd.read_csv(latest_series)
+                st.session_state['report_series_csv_filename'] = latest_series
+            else:
+                st.session_state['report_df_series'] = None
+
+            st.session_state['current_report_name'] = selected_report_name
+            st.session_state['fresh_report_run'] = False
+        else:
+            # No report found for this selection
+            for key in ['report_df', 'report_csv_filename', 'report_df_series', 'report_series_csv_filename']:
+                st.session_state[key] = None
+            st.session_state['current_report_name'] = selected_report_name
+            st.session_state['fresh_report_run'] = False
+
+    # 5. Unified Display Logic
+    if 'report_df' in st.session_state and st.session_state['report_df'] is not None:
         df = st.session_state['report_df']
-        csv_filename = st.session_state['report_csv_filename']
-        df_series = st.session_state['report_df_series']
-        series_csv_filename = st.session_state['report_series_csv_filename']
+        df_series = st.session_state.get('report_df_series')
+        report_name = st.session_state['current_report_name']
 
-        # Display the dataframe
+        # a. Download links (Fresh only)
+        if st.session_state.get('fresh_report_run'):
+            st.success(f"Fresh {report_name} generated successfully!")
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                st.download_button(
+                    label="Download Study-level CSV",
+                    data=df.to_csv(index=False),
+                    file_name=st.session_state['report_csv_filename'],
+                    mime="text/csv"
+                )
+            if df_series is not None:
+                with col_dl2:
+                    st.download_button(
+                        label="Download Series-level CSV",
+                        data=df_series.to_csv(index=False),
+                        file_name=st.session_state['report_series_csv_filename'],
+                        mime="text/csv"
+                    )
+        else:
+             st.info(f"Displaying summary from the latest cached report: {st.session_state.get('report_csv_filename')}")
+
+        st.header(f"{report_name} Summary Dashboard")
+
+        # b. Overall Metrics (Unfiltered)
+        total_patients = df['PatientID'].nunique()
+        total_studies = df['StudyInstanceUID'].nunique()
+        col_total1, col_total2 = st.columns(2)
+        with col_total1:
+            st.metric("Total Unique Patients", total_patients)
+        with col_total2:
+            st.metric("Total Unique Studies", total_studies)
+
+        # c. Accrual Summary (Unfiltered)
+        summary_table = df.groupby(['Collection', 'Site']).agg({
+            'PatientID': 'nunique',
+            'StudyInstanceUID': 'nunique'
+        }).reset_index().rename(columns={
+            'PatientID': 'Unique Patients',
+            'StudyInstanceUID': 'Unique Studies'
+        })
+        st.subheader("Accrual Summary")
+        st.table(summary_table)
+
+        # d. Monthly Report Data (Unfiltered)
         st.subheader("Monthly Report Data")
-        st.dataframe(df)
+        st.dataframe(df, use_container_width=True)
 
-        # Offer CSV download
-        col_dl1, col_dl2 = st.columns(2)
-        with col_dl1:
-            st.download_button(
-                label="Download Study-level CSV",
-                data=df.to_csv(index=False),
-                file_name=csv_filename,
-                mime="text/csv"
-            )
-        with col_dl2:
-            st.download_button(
-                label="Download Series-level CSV",
-                data=df_series.to_csv(index=False),
-                file_name=series_csv_filename,
-                mime="text/csv"
-            )
+        # e. Dashboard Filters (Sidebar)
+        df_filtered, _, _ = dashboard_filters(df, version=st.session_state['filter_version'])
 
-        # Visualizations
-        st.subheader("Report Summary Stats")
-        st.write("Summary statistics for the freshly generated report.")
+        # f. Distributions (Filtered)
+        st.subheader("Distributions")
+        col_dist1, col_dist2 = st.columns(2)
+        with col_dist1:
+            # PatientID by PatientSex
+            sex_counts = df_filtered.drop_duplicates('PatientID')['PatientSex'].value_counts().reset_index()
+            sex_counts.columns = ['PatientSex', 'Count']
+            st.plotly_chart(px.pie(sex_counts, values='Count', names='PatientSex', title="PatientID by PatientSex"), use_container_width=True)
 
-        col1, col2 = st.columns(2)
+            # PatientID by EthnicGroup
+            ethnic_counts = df_filtered.drop_duplicates('PatientID')['EthnicGroup'].value_counts().reset_index()
+            ethnic_counts.columns = ['EthnicGroup', 'Count']
+            st.plotly_chart(px.pie(ethnic_counts, values='Count', names='EthnicGroup', title="PatientID by EthnicGroup"), use_container_width=True)
 
-        with col1:
             # PatientID by Collection
-            patient_counts = df.groupby('Collection')['PatientID'].nunique().reset_index()
-            fig_collection = px.pie(patient_counts, values='PatientID', names='Collection',
-                                    title="PatientID by Collection")
-            st.plotly_chart(fig_collection)
+            patient_counts = df_filtered.groupby('Collection')['PatientID'].nunique().reset_index()
+            st.plotly_chart(px.pie(patient_counts, values='PatientID', names='Collection', title="PatientID by Collection"), use_container_width=True)
 
-        with col2:
+        with col_dist2:
+            # StudyInstanceUID by PatientAge
+            st.plotly_chart(px.histogram(df_filtered, x='PatientAge_Numeric', title="StudyInstanceUID by PatientAge", labels={'PatientAge_Numeric': 'Patient Age (Years)'}), use_container_width=True)
+
+            # Distribution of Visits per Patient
+            visits_per_patient = df_filtered.groupby('PatientID')['StudyDate'].nunique().reset_index()
+            visits_per_patient.columns = ['PatientID', 'Unique Study Dates']
+            st.plotly_chart(px.histogram(visits_per_patient, x='Unique Study Dates', title="Distribution of Visits per Patient", labels={'Unique Study Dates': 'Number of Unique Study Dates'}), use_container_width=True)
+
             # Image Count by Collection
-            fig_image_count = px.bar(df.groupby('Collection')['ImageCount'].sum().reset_index(),
-                                     x='Collection', y='ImageCount', title="Total Image Count by Collection")
-            st.plotly_chart(fig_image_count)
+            fig_image_count = px.bar(df_filtered.groupby('Collection')['ImageCount'].sum().reset_index(), x='Collection', y='ImageCount', title="Total Image Count by Collection")
+            st.plotly_chart(fig_image_count, use_container_width=True)
 
-        # What Changed section for freshly generated report
-        display_what_changed(df_series)
+        # g. Annotation Progress Tracker (Unfiltered)
+        st.subheader("Annotation Progress Tracker")
+        st.write("Number of unique Study Dates containing the selected modality per patient.")
+        modality_to_track = st.radio("Select Modality to Track", ('RTSTRUCT', 'SEG'))
+        mask_mod = df['Unique Modalities'].apply(lambda x: modality_to_track in str(x).split(', ') if pd.notna(x) else False)
+        mod_filtered = df[mask_mod]
+        mod_counts = mod_filtered.groupby('PatientID')['StudyDate'].nunique().reset_index()
+        mod_counts.columns = ['PatientID', 'Count']
+        all_patients = pd.DataFrame(df['PatientID'].unique(), columns=['PatientID'])
+        mod_counts = pd.merge(all_patients, mod_counts, on='PatientID', how='left').fillna(0)
+        def categorize(count):
+            if count == 0: return '0 visits'
+            if count == 1: return '1 visit'
+            return '2+ visits'
+        mod_counts['Category'] = mod_counts['Count'].apply(categorize)
+        progress_data = mod_counts['Category'].value_counts().reset_index()
+        progress_data.columns = ['Category', 'Patient Count']
+        for cat in ['0 visits', '1 visit', '2+ visits']:
+            if cat not in progress_data['Category'].values:
+                progress_data = pd.concat([progress_data, pd.DataFrame([{'Category': cat, 'Patient Count': 0}])], ignore_index=True)
+        progress_data['sort_idx'] = progress_data['Category'].map({'0 visits': 0, '1 visit': 1, '2+ visits': 2})
+        progress_data = progress_data.sort_values('sort_idx')
+        st.plotly_chart(px.bar(progress_data, x='Category', y='Patient Count', title=f"Patients with {modality_to_track} Annotations", color='Category', color_discrete_map={'0 visits': 'red', '1 visit': 'orange', '2+ visits': 'green'}), use_container_width=True)
+
+        # h. What Changed (Unfiltered)
+        if df_series is not None:
+            display_what_changed(df_series)
+    else:
+        st.warning(f"No previous {selected_report_name} reports found. Please generate a report to populate the dashboard.")
 
 if __name__ == "__main__":
     main()
