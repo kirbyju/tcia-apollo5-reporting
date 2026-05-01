@@ -343,6 +343,7 @@ def getSeriesList(uids: List[str], api_url: str = "", format: str = "df") -> Opt
         'License Name': 'LicenseName',
         'License URI': 'LicenseURI',
         'Collection URI': 'DataDescriptionURI',
+        'MaxSubmissionTimestamp': 'MaxSubmissionTimestamp',
     }
     df.rename(columns=column_mapping, inplace=True)
     return df

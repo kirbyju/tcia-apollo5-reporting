@@ -13,11 +13,18 @@ from pandas.api.types import (
     is_object_dtype,
 )
 
-def get_latest_report():
+def get_latest_report(report_type="monthly"):
     """
-    Finds the most recent APOLLO-5 monthly report CSV file.
+    Finds the most recent report CSV file based on report_type.
     """
-    list_of_files = glob.glob('APOLLO-5-monthly-report_*.csv')
+    if report_type == "monthly":
+        pattern = 'APOLLO-5-monthly-report_*.csv'
+    elif report_type == "series":
+        pattern = 'APOLLO-5-series-report_*.csv'
+    else:
+        return None
+
+    list_of_files = glob.glob(pattern)
     if not list_of_files:
         return None
     latest_file = max(list_of_files, key=os.path.getctime)
@@ -26,7 +33,191 @@ def get_latest_report():
 def preprocess_age(age):
     if pd.isna(age) or age == 'None':
         return None
-    return int(age.rstrip('Y'))
+    try:
+        return int(str(age).rstrip('Y'))
+    except ValueError:
+        return None
+
+def get_target_month():
+    """
+    Returns the first and last day of the previous month.
+    """
+    today = datetime.date.today()
+    first_day_of_this_month = today.replace(day=1)
+    last_day_of_last_month = first_day_of_this_month - datetime.timedelta(days=1)
+    first_day_of_last_month = last_day_of_last_month.replace(day=1)
+    return first_day_of_last_month, last_day_of_last_month
+
+def display_what_changed(df_series):
+    """
+    Displays the 'What Changed' table, overall summary stats, and growth charts.
+    """
+    if df_series is None or df_series.empty:
+        st.warning("No series data available for 'What Changed' analysis.")
+        return
+
+    st.divider()
+    st.header("What Changed (Last Full Month)")
+
+    start_date, end_date = get_target_month()
+    st.write(f"Reporting changes for: **{start_date.strftime('%B %Y')}**")
+
+    # Ensure MaxSubmissionTimestamp is datetime
+    if 'MaxSubmissionTimestamp' not in df_series.columns:
+        st.error("Column 'MaxSubmissionTimestamp' not found in series data. Cannot perform 'What Changed' analysis.")
+        return
+
+    df_series = df_series.copy()
+    df_series['MaxSubmissionTimestamp'] = pd.to_datetime(df_series['MaxSubmissionTimestamp'])
+
+    # Target month filter
+    mask_target = (df_series['MaxSubmissionTimestamp'].dt.date >= start_date) & \
+                  (df_series['MaxSubmissionTimestamp'].dt.date <= end_date)
+    mask_prior = (df_series['MaxSubmissionTimestamp'].dt.date < start_date)
+
+    new_series_df = df_series[mask_target].copy()
+    prior_series_df = df_series[mask_prior].copy()
+
+    if new_series_df.empty:
+        st.info(f"No new items found for {start_date.strftime('%B %Y')}.")
+    else:
+        # Identify New vs Updated studies
+        prior_studies = set(prior_series_df['StudyInstanceUID'].unique())
+        target_studies_uids = new_series_df['StudyInstanceUID'].unique()
+
+        new_studies = set()
+        updated_studies = set()
+
+        for sid in target_studies_uids:
+            if sid in prior_studies:
+                updated_studies.add(sid)
+            else:
+                new_studies.add(sid)
+
+        # Table per patient
+        # Columns: Collection, Patient ID, Site, New study count, new series count
+        patient_stats = new_series_df.groupby('PatientID').agg({
+            'Collection': 'unique',
+            'Site': 'unique',
+            'StudyInstanceUID': [
+                lambda x: len(set(x) & new_studies),
+                lambda x: len(set(x) & updated_studies)
+            ],
+            'SeriesInstanceUID': 'nunique'
+        }).reset_index()
+
+        patient_stats.columns = ['PatientID', 'Collections', 'Sites', 'New study count', 'Updated study count', 'new series count']
+
+        # Check for multiple collections/sites
+        for idx, row in patient_stats.iterrows():
+            if len(row['Collections']) > 1 or len(row['Sites']) > 1:
+                st.warning(f"Patient {row['PatientID']} is associated with multiple collections/sites: {row['Collections']} / {row['Sites']}")
+
+        # Format for display
+        patient_stats['Collection'] = patient_stats['Collections'].apply(lambda x: ', '.join(map(str, sorted(x))))
+        patient_stats['Site'] = patient_stats['Sites'].apply(lambda x: ', '.join(map(str, sorted(x))))
+
+        display_table = patient_stats[['Collection', 'PatientID', 'Site', 'New study count', 'Updated study count', 'new series count']]
+        st.subheader("Changes by Patient")
+        st.dataframe(display_table, use_container_width=True)
+
+        # Totals at the bottom of the table
+        total_collections_updated = new_series_df['Collection'].nunique()
+        total_subjects_updated = new_series_df['PatientID'].nunique()
+        total_sites_updated = new_series_df['Site'].nunique()
+        total_studies_new = len(new_studies)
+        total_studies_updated = len(updated_studies)
+        total_series_added = new_series_df['SeriesInstanceUID'].nunique()
+
+        st.subheader("Summary of Changes")
+        col_t1, col_t2, col_t3, col_t4, col_t5, col_t6 = st.columns(6)
+        col_t1.metric("Collections Updated", total_collections_updated)
+        col_t2.metric("Subjects Updated", total_subjects_updated)
+        col_t3.metric("Sites Updated", total_sites_updated)
+        col_t4.metric("New Studies Added", total_studies_new)
+        col_t5.metric("Existing Studies Updated", total_studies_updated)
+        col_t6.metric("New Series Added", total_series_added)
+
+    # Overall summary stats (always show for entire filtered dataset)
+    st.divider()
+    st.header("Overall Summary Stats")
+    total_patients_inv = df_series['PatientID'].nunique()
+    total_studies_inv = df_series['StudyInstanceUID'].nunique()
+    total_series_inv = df_series['SeriesInstanceUID'].nunique()
+    total_images_inv = df_series['ImageCount'].sum()
+    total_size_bytes = df_series['FileSize'].sum()
+    total_size_tb = total_size_bytes / 1e12
+
+    col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
+    col_s1.metric("Total Subjects", total_patients_inv)
+    col_s2.metric("Total Studies", total_studies_inv)
+    col_s3.metric("Total Series", total_series_inv)
+    col_s4.metric("Total Images", f"{total_images_inv:,}")
+    col_s5.metric("Total Size (TB)", f"{total_size_tb:.2f}")
+
+    # Growth charts
+    st.divider()
+    st.header("Growth Over Time")
+
+    df_growth = df_series.dropna(subset=['MaxSubmissionTimestamp']).sort_values('MaxSubmissionTimestamp')
+    if not df_growth.empty:
+        df_growth['Month'] = df_growth['MaxSubmissionTimestamp'].dt.to_period('M').dt.to_timestamp()
+
+        # Cumulative stats by month
+        monthly_groups = df_growth.groupby('Month')
+
+        months = []
+        cum_patients = []
+        cum_studies = []
+        cum_series = []
+        cum_images = []
+        cum_size = []
+
+        all_patients = set()
+        all_studies = set()
+        total_series_count = 0
+        total_images_count = 0
+        total_size_count = 0
+
+        for month, group in monthly_groups:
+            months.append(month)
+            all_patients.update(group['PatientID'].unique())
+            all_studies.update(group['StudyInstanceUID'].unique())
+            total_series_count += group['SeriesInstanceUID'].nunique()
+            total_images_count += group['ImageCount'].sum()
+            total_size_count += group['FileSize'].sum()
+
+            cum_patients.append(len(all_patients))
+            cum_studies.append(len(all_studies))
+            cum_series.append(total_series_count)
+            cum_images.append(total_images_count)
+            cum_size.append(total_size_count / 1e12)
+
+        growth_df = pd.DataFrame({
+            'Month': months,
+            'Cumulative Patients': cum_patients,
+            'Cumulative Studies': cum_studies,
+            'Cumulative Series': cum_series,
+            'Cumulative Images': cum_images,
+            'Cumulative Size (TB)': cum_size
+        })
+
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            fig_p_s = px.line(growth_df, x='Month', y=['Cumulative Patients', 'Cumulative Studies'], title="Growth of Patients and Studies")
+            st.plotly_chart(fig_p_s, use_container_width=True)
+
+            fig_i = px.line(growth_df, x='Month', y='Cumulative Images', title="Growth of Images")
+            st.plotly_chart(fig_i, use_container_width=True)
+
+        with col_g2:
+            fig_ser = px.line(growth_df, x='Month', y='Cumulative Series', title="Growth of Series")
+            st.plotly_chart(fig_ser, use_container_width=True)
+
+            fig_sz = px.line(growth_df, x='Month', y='Cumulative Size (TB)', title="Growth of Data Size")
+            st.plotly_chart(fig_sz, use_container_width=True)
+    else:
+        st.info("No submission timestamp data available for growth charts.")
 
 def filter_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -304,10 +495,12 @@ def dashboard_filters(df):
     # Age Filter
     min_age = int(df['PatientAge_Numeric'].min()) if not df['PatientAge_Numeric'].dropna().empty else 0
     max_age = int(df['PatientAge_Numeric'].max()) if not df['PatientAge_Numeric'].dropna().empty else 120
+    if min_age > max_age:
+        min_age, max_age = max_age, min_age
     selected_age = st.sidebar.slider("Patient Age", min_age, max_age, (min_age, max_age))
     filtered_df = filtered_df[filtered_df['PatientAge_Numeric'].between(selected_age[0], selected_age[1])]
 
-    return filtered_df
+    return filtered_df, selected_collections, selected_sites
 
 def main():
 
@@ -322,7 +515,7 @@ def main():
         cached_df = pd.read_csv(latest_report)
 
         # Apply filters
-        df_filtered = dashboard_filters(cached_df)
+        df_filtered, selected_collections, selected_sites = dashboard_filters(cached_df)
 
         st.header("APOLLO-5 Summary Dashboard")
 
@@ -425,6 +618,21 @@ def main():
                               color_discrete_map={'0 visits': 'red', '1 visit': 'orange', '2+ visits': 'green'})
         st.plotly_chart(fig_progress)
 
+        # What Changed section for Dashboard
+        latest_series_report = get_latest_report(report_type="series")
+        if latest_series_report:
+            cached_series_df = pd.read_csv(latest_series_report)
+            # Filter series data based on dashboard filters (Collection, Site)
+            if selected_collections:
+                cached_series_df = cached_series_df[cached_series_df['Collection'].isin(selected_collections)]
+            if selected_sites:
+                mask_s = cached_series_df['Site'].apply(
+                    lambda x: any(s in str(x).split(', ') for s in selected_sites) if pd.notna(x) else False
+                )
+                cached_series_df = cached_series_df[mask_s]
+
+            display_what_changed(cached_series_df)
+
     else:
         st.warning("No previous APOLLO-5 reports found. Please generate a report to populate the dashboard.")
 
@@ -516,6 +724,9 @@ def main():
             fig_image_count = px.bar(df.groupby('Collection')['ImageCount'].sum().reset_index(),
                                      x='Collection', y='ImageCount', title="Total Image Count by Collection")
             st.plotly_chart(fig_image_count)
+
+        # What Changed section for freshly generated report
+        display_what_changed(df_series)
 
 if __name__ == "__main__":
     main()
