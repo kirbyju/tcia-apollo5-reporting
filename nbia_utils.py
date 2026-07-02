@@ -8,7 +8,7 @@ from datetime import datetime
 from datetime import timedelta
 from enum import Enum
 
-token_url = "https://keycloak.dbmi.cloud/auth/realms/TCIA/protocol/openid-connect/token"
+token_url = "https://keycloak-stg.dbmi.cloud/auth/realms/TCIA/protocol/openid-connect/token"
 
 class StopExecution(Exception):
     def _render_traceback_(self):
